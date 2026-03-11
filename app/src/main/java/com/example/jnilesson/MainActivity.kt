@@ -22,6 +22,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -101,64 +102,68 @@ fun ImageProcessorScreen(){
         if(currentStats.mode.isNotEmpty()){
             BenchmarkTable(stats = currentStats)
         }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(checked = useWarmUp, onCheckedChange = {useWarmUp = it})
+            Text("Enable 10x Iteration Warm up", modifier = Modifier.padding(start = 8.dp))
+        }
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(top = 8.dp)
         ) {
             Button(onClick = {
-                //measure first run separetely
+                // measure first run separately
                 val start = System.currentTimeMillis()
                 NativeProcessor.convertToGray(workingBitmap)
                 val firstNative = System.currentTimeMillis() - start
 
                 var warmNative = 0L
-                if(useWarmUp){
+                if (useWarmUp) {
                     val warmStart = System.currentTimeMillis()
-                    repeat(9){
-                        NativeProcessor.convertToGray(workingBitmap)
-                    }
+                    repeat(9) { NativeProcessor.convertToGray(workingBitmap) }
                     warmNative = (System.currentTimeMillis() - warmStart) / 9
                 }
 
                 currentStats = BenchmarkStats("Native", firstNative, warmNative, true)
+                updateTick++
+            }) { Text("Run Native") }
 
-            }) {
-                Text("Run native")
-            }
 
             Button(onClick = {
-                //Measure first
+                // measure first run separately
                 val start = System.currentTimeMillis()
                 NativeProcessor.convertToGrayKotlin(workingBitmap)
                 val firstKotlin = System.currentTimeMillis() - start
 
                 var warmAvg = 0L
-                if(useWarmUp){
+                if (useWarmUp) {
                     val warmStart = System.currentTimeMillis()
-                    repeat(9){ NativeProcessor.convertToGrayKotlin(workingBitmap)}
+                    repeat(9) { NativeProcessor.convertToGrayKotlin(workingBitmap) }
                     warmAvg = (System.currentTimeMillis() - warmStart) / 9
                 }
 
                 currentStats = BenchmarkStats("Kotlin", firstKotlin, warmAvg, false)
-
-
-            }) {
-                Text("Run Kotlin")
-            }
+                updateTick++
+            }) { Text("Run Kotlin") }
 
             Button(
                 onClick = {
                     workingBitmap.recycle()
                     val options = BitmapFactory.Options().apply {
                         inSampleSize = calculateInSampleSize(this, 1024, 1024)
-                       // isMutable = true
+                        inMutable = true
                     }
                     workingBitmap = BitmapFactory.decodeResource(context.resources, R.drawable.image, options)
                         ?: createBitmap(100, 100)
 
+                    // clear benchmark stats and force-trigger garbage collection
+                    // cannot reset JIT performance optimization
+                    // without restarting app
+                    currentStats = BenchmarkStats()
+                    updateTick++
+                    System.gc()
                 },
                 modifier = Modifier.padding(top = 8.dp)
-            ) { Text("Reset") }
+            ) { Text("Deep Reset (Clear Cache)") }
         }
     }
 }
@@ -179,19 +184,18 @@ fun BenchmarkTable(stats: BenchmarkStats) {
         )
         Spacer(modifier = Modifier.height(8.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Cold Start (1st run): ", style = MaterialTheme.typography.bodyMedium)
+            Text("Cold Start (1st Run):", style = MaterialTheme.typography.bodyMedium)
             Text("${stats.firstRun}ms", fontWeight = FontWeight.Bold, color = Color.Red)
         }
 
-        if(stats.warmAvg > 0){
-            Row(modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Warm Average (JIT)", style = MaterialTheme.typography.bodyMedium)
-                Text("${stats.warmAvg}ms", fontWeight = FontWeight.Bold, color = Color(0xFF4CA56))
+        if (stats.warmAvg > 0) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Warm Average (JIT):", style = MaterialTheme.typography.bodyMedium)
+                Text("${stats.warmAvg}ms", fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
             }
         }
 
-        val delta = if(stats.warmAvg > 0) stats.firstRun - stats.warmAvg else 0
+        val delta = if (stats.warmAvg > 0) stats.firstRun - stats.warmAvg else 0
 
         if(delta > 0){
             Text(
